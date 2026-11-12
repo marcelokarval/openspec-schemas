@@ -8,7 +8,7 @@ Community-contributed [OpenSpec](https://github.com/Fission-AI/OpenSpec) schemas
 
 | Bridge | Purpose | Status |
 |--------|---------|--------|
-| [`superpowers-bridge`](./superpowers-bridge/) | Bridges OpenSpec's artifact governance with [obra/superpowers](https://github.com/obra/superpowers) execution skills (brainstorming, writing-plans, TDD-via-subagents, code review, finishing). Adds an evidence-first `retrospective` artifact filling a gap Superpowers does not natively cover. | v1 |
+| [`superpowers-bridge`](./superpowers-bridge/) | Bridges OpenSpec artifacts with [Superpowers](https://github.com/obra/superpowers) planning, TDD and review, including an evidence-first retrospective. | v2 local candidate; compatibility unverified |
 
 ## Why a separate repository?
 
@@ -21,7 +21,7 @@ Benefits:
 
 ## Install
 
-Each bridge directory has its own `README.md` with a copy-paste Claude Code prompt for one-shot installation, plus a manual bash alternative. See e.g. [`superpowers-bridge/README.md#install`](./superpowers-bridge/README.md#install).
+See [`superpowers-bridge/README.md`](./superpowers-bridge/README.md) for the v2 contract and migration limits. Installation requires separate authorization.
 
 ## Roadmap
 

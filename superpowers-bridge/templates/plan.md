@@ -1,17 +1,13 @@
-# [Feature Name] Implementation Plan
+# Implementation plan
 
-> **For agentic workers:** Use superpowers:subagent-driven-development
-> to implement this plan task-by-task.
+**Goal:** <!-- goal -->
+**Architecture:** <!-- decisions -->
+**Skill mapping and observed invocation:** <!-- evidence -->
 
-**Goal:** <!-- One sentence -->
+## Task 1.1: <!-- stable tasks.md ID -->
 
-**Architecture:** <!-- 2-3 sentences -->
-
-**Tech Stack:** <!-- Key technologies -->
-
----
-
-## Task 1: <!-- Component Name -->
-
-- [ ] **Step 1:** <!-- micro-step -->
-- [ ] **Step 2:** <!-- micro-step -->
+- RED command and observed failure: <!-- evidence -->
+- GREEN command and observed result: <!-- evidence -->
+- Typed evidence outcomes: RED expected_failure; GREEN passed.
+- Review candidate identity and reviewer: <!-- evidence -->
+- Remaining gaps: <!-- none or blockers -->

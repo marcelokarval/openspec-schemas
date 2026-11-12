@@ -38,19 +38,14 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "Latest Superpowers: $tag"
 
-      - name: Read pinned versions from README
+      - name: Read source-review targets
         id: pinned
         run: |
-          line=$(grep -E '^\| v1 \| `' superpowers-bridge/README.md | head -1)
-          if [ -z "$line" ]; then
-            echo "::error::Could not find Compatibility table row in superpowers-bridge/README.md"
-            exit 1
-          fi
-          pinned_openspec=$(echo "$line" | awk -F'`' '{print $2}')
-          pinned_superpowers=$(echo "$line" | awk -F'`' '{print $4}')
+          pinned_openspec=$(jq -er '.openspec | strings | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))' superpowers-bridge/source-versions.json)
+          pinned_superpowers=$(jq -er '.superpowers | strings | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))' superpowers-bridge/source-versions.json)
           echo "openspec=$pinned_openspec" >> "$GITHUB_OUTPUT"
           echo "superpowers=$pinned_superpowers" >> "$GITHUB_OUTPUT"
-          echo "Pinned in README: OpenSpec=$pinned_openspec, Superpowers=$pinned_superpowers"
+          echo "Source-review targets: OpenSpec=$pinned_openspec, Superpowers=$pinned_superpowers"
 
       - name: Install OpenSpec CLI (latest)
         run: npm install -g @fission-ai/openspec@${{ steps.openspec.outputs.version }}
@@ -116,7 +111,7 @@ jobs:
               '',
               '## Detected versions',
               '',
-              '| Component | Pinned in README | Latest upstream | Drift? |',
+              '| Component | Source-review target | Latest upstream | Drift? |',
               '|---|---|---|---|',
               `| OpenSpec CLI | \`${openspecPinned}\` | \`${openspecLatest}\` | ${openspecDrift ? '**Yes**' : 'No'} |`,
               `| Superpowers | \`${superpowersPinned}\` | \`${superpowersLatest}\` | ${superpowersDrift ? '**Yes**' : 'No'} |`,
@@ -131,8 +126,7 @@ jobs:
               '',
               '- [ ] Review Superpowers release notes for behavioral changes (skill renames, PRECHECK semantics, transitive deps): https://github.com/obra/superpowers/releases',
               '- [ ] Review OpenSpec changelog: https://github.com/Fission-AI/OpenSpec/releases',
-              '- [ ] If safe, bump the Compatibility table in `superpowers-bridge/README.md` and `superpowers-bridge/README.zh-TW.md` (set `Last verified` to today).',
-              '- [ ] If breaking, add an entry under "Known breaking changes" in both READMEs.',
+              '- [ ] Update source-versions.json only after source review; update both READMEs without implying compatibility proof.',
               '',
               `_Workflow run: ${runUrl}_`,
             ].join('\n');

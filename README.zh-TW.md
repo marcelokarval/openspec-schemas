@@ -8,7 +8,7 @@
 
 | Bridge | 用途 | 狀態 |
 |--------|------|------|
-| [`superpowers-bridge`](./superpowers-bridge/) | 把 OpenSpec 的 artifact 治理流程與 [obra/superpowers](https://github.com/obra/superpowers) 的執行技能(brainstorming、writing-plans、TDD-via-subagents、code review、finishing)串接成一個工作流。額外加上 evidence-first 的 `retrospective` artifact,補上 Superpowers 沒有的 retro 能力。 | v1 |
+| [`superpowers-bridge`](./superpowers-bridge/) | 結合 OpenSpec 文件與 [Superpowers](https://github.com/obra/superpowers) 規劃、TDD、審查及證據導向的 retrospective。 | v2 本地候選，相容性未驗證 |
 
 ## 為什麼另外開一個 repo?
 
@@ -22,7 +22,7 @@
 
 ## 安裝
 
-每個 bridge 子目錄底下都有自己的 `README.md`,附**複製貼上到 Claude Code 一鍵安裝**的 prompt,以及手動 bash 替代方案。例如 [`superpowers-bridge/README.md#install`](./superpowers-bridge/README.md#install)。
+v2 合約與遷移限制見 [`superpowers-bridge/README.zh-TW.md`](./superpowers-bridge/README.zh-TW.md)。安裝須另行授權。
 
 ## Roadmap
 
