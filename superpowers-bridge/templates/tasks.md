@@ -1,5 +1,7 @@
 ## 1. <!-- Task Group Name -->
 
+<!-- Stable unique numeric IDs; plan steps reference these exact IDs. -->
+
 - [ ] 1.1 <!-- Task description -->
 - [ ] 1.2 <!-- Task description -->
 

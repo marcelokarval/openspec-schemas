@@ -73,7 +73,7 @@ openspec-schemas/                     ← 本 repo
    openspec schema validate <bridge-name>
    openspec schemas
    ```
-3. 若有時序錯位 / 錯誤行為更動,**也要同步更新 `superpowers-bridge/README.md` 的「六個值得記住的設計觸點」段**(尤其是 verify/retrospective 時序錯位那段),並同步繁中版。
+3. 時序或行為更動時同步更新 bridge 英文與繁中 README；verify 與 retrospective 的 graph 依賴不代表實際完成順序。
 4. Commit message 用英文,符合 conventional commits(`feat:`、`fix:`、`refactor:`、`chore:`、`docs:`、`ci:`)
 5. push 觸發 CI
 
@@ -84,14 +84,14 @@ PR #970 review 提出三個顧慮,本 schema 在 v1 已具體應對。Claude 在
 | 顧慮 | 應對 |
 |------|------|
 | #3 主動 commit 使用者 git | **完全移除**。Step 0 改為 skill PRECHECK,只驗 skill 不動 git |
-| #1 與 Superpowers 強耦合無 capability detection | **Layer 1**:每個 invoke skill 的 instruction 開頭跑 PRECHECK,缺失就 STOP。**Layer 2**:對 verify / retrospective 加 evidence-based PRECHECK(`git log`、`grep` 檢查可觀察狀態) |
+| #1 與 Superpowers 強耦合無 capability detection | 明確對應可用 skill 名稱與實際呼叫；verify / retrospective 使用明確 base、manifest 與 guard，缺失即停止。 |
 | #2 verify 時序錯位(以及 retrospective 同型) | 已知限制,在 bridge README 的「設計觸點 #6」文件化。完整修法等 OpenSpec 引擎引入 `post_apply` phase。Layer 2 evidence-based PRECHECK 是當前緩解 |
 
 **修 schema 時的紅旗** —— 以下行為**不要做**(會反 PR #970 的應對):
 
 - ❌ 在 instruction 寫「主動 git add / git commit」
 - ❌ 拿掉某個 PRECHECK 但沒換更強的替代品
-- ❌ 把 verify / retrospective 從 artifact 拉掉但沒在 README「設計觸點」段同步更新限制
+- ❌ 把 verify / retrospective 從 artifact 拉掉但沒在雙語 README 同步更新限制
 - ❌ 改 schema name 但沒同步改 bridge 內所有文件 + 頂層 README 的 bridge 索引
 
 ## 相關連結
