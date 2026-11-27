@@ -15,9 +15,9 @@ base, and existing change directory. No remote is required. Paths are arguments,
 not shell fragments; quote them. Replace `<bundle>` with this bundle's path:
 
 ```sh
-python3 '<bundle>/scripts/bridge_guard.py' preflight --repo '<repo>' --base '<base>' --change '<change>'
-python3 '<bundle>/scripts/bridge_guard.py' candidate --repo '<repo>' --base '<base>' --change '<change>'
-python3 '<bundle>/scripts/bridge_guard.py' verify --repo '<repo>' --base '<base>' --change '<change>'
+python3 -B '<bundle>/scripts/bridge_guard.py' preflight --repo '<repo>' --base '<base>' --change '<change>'
+python3 -B '<bundle>/scripts/bridge_guard.py' candidate --repo '<repo>' --base '<base>' --change '<change>'
+python3 -B '<bundle>/scripts/bridge_guard.py' verify --repo '<repo>' --base '<base>' --change '<change>'
 ```
 
 Preflight requires nonempty brainstorm, proposal, design, tasks, plan and at least
@@ -58,8 +58,8 @@ GREEN. Plan headings may be `## Task 1.1` or `## Task 1.1: Title`, with no uncom
 checkboxes. The guard rejects conflict markers such as FAIL and NOT VERIFIED in
 the verification report; use separate records for prior failed attempts. JSON
 records remain assertions requiring independent examination. Individual files
-are bounded to 4 MiB. The supported Markdown fence syntax allows 0–3 leading
-spaces; ambiguous indented fences are rejected.
+are bounded to 4 MiB. The legacy guard fence syntax allows 0–3 leading spaces.
+Marked artifacts require fence openers in column 0.
 
 Map skills to observed native names, e.g. `brainstorming` or
 `superpowers:brainstorming`, and record actual invocation. Supported subagent
@@ -68,6 +68,189 @@ alone is not proof of loading or behavior. Commits, new workspaces, installs,
 archive, release, PR, push and merge require separate authorization. Archive is
 not human acceptance or release. Optional checks cannot replace mandatory checks
 without owner approval.
+
+## Planning with task microcontracts
+
+Decompose, review, and refine the plan before execution. Give each task one
+outcome a reviewer can verify independently, and keep its supporting steps with
+it. `tasks.md` stays the canonical checklist. Keep its stable IDs and proven
+progress; give newly split work new IDs, update affected references in both
+artifacts, and revalidate. No per-task files or separate tracker are needed.
+
+New plans must keep one literal `Bridge task contract: 1` line. Under each
+`## Task X.Y` or `## Task X.Y: Title`, fill these top-level fields as in the
+template:
+
+- `Outcome`, `Owner/resolver`, `Acceptance`, `Stop` and `Resume` require concrete
+  text. Name who owns the outcome or resolves open decisions, the check that
+  proves the complete outcome, when to stop, and what allows resumption.
+- `Inputs` records required inputs outside the task graph, or `none`.
+- `Depends on` lists prerequisite IDs, or `none`. Use one `Needs: ID => output-id`
+  per prerequisite and match its `Produces` identifier exactly. A root instead
+  has one `Needs: none`. `Produces` is one identifier for the delivered output;
+  describe the output in `Outcome`.
+- `Write paths`, `Exclusions`, and `Shared resources` are comma-separated lists,
+  or `none` when empty. Paths are exact repository-relative names, with letters,
+  digits, `.`, `_`, `@`, `+`, or `-` in slash-separated segments; no absolute
+  paths, traversal, or globs. `Exclusions` limits this task's writes. Resource and
+  output IDs start with an ASCII letter or digit and may also contain `_ . : -`.
+  Each path or identifier is limited to 1,024 characters.
+
+Fenced examples and HTML comments do not count. In marked artifacts, HTML
+comments and inline code must open and close on the same line, and raw HTML
+blocks are rejected. Use a fence for multiline examples or literal HTML
+comment delimiters. Open each example fence in column 0, without indentation.
+Outside comments and fences, marked artifacts reject backslash-escaped comment
+delimiters and comment delimiters in inline code or after an unmatched backtick
+run on the same line. In a marked plan, use an unindented `-` for each task microcontract field;
+spaces or tabs around field names do not change which field is declared.
+In `tasks.md`, use only top-level `- [ ] X.Y Description` entries
+with the supported checkbox states; alternate list markers and nested task
+checkboxes are rejected. Documentation list items such as `- [Design](design.md)`,
+`- [Design](design.md "Design notes")`, and `- [Design][notes]` do not create tasks.
+Define `notes` as a Markdown link reference; the checker does not resolve link
+destinations. The checker also rejects blank prompts, placeholders such as `TBD`,
+and conflicting declarations.
+Before handing off a new plan and after refining it, run:
+
+```sh
+python3 -B '<bundle>/scripts/bridge_guard.py' planning --change '<change-dir>'
+```
+
+Without rule opt-in, `planning` reads the task contract in `plan.md` and
+`tasks.md`. Rule planning also reads the delta specs. No candidate manifest is
+needed. For a canonical rule outside the change, use the containing Git root:
+
+```sh
+python3 -B '<bundle>/scripts/bridge_guard.py' planning --repo '<repo>' --change '<change-dir>'
+```
+
+The resolved bundle's `scripts/bridge_guard.py --help` defines the CLI.
+`planning` requires `Bridge task contract: 1` in every plan it validates.
+Add `Bridge rule contract: 1` only when the change involves material rules.
+Unknown or duplicate
+markers fail wherever the contract is read. `preflight`, `candidate`, and
+`verify` also validate marked plans against `tasks.md`; candidate identity still
+binds the original bytes. For marked plans, `verify` requires visible report
+sections and rejects unfinished plan checkboxes on ordinary Markdown list items,
+including nested items. Existing unmarked plans retain their legacy guard and
+projection behavior. There is no automatic migration. A structural pass does
+not prove the inputs exist, that claims are complete, or that a plan is approved.
+
+The agent selects the rule contract when two interpretations would change an
+outcome, permission or acceptance criterion. A wording change with no such effect
+needs no declaration. Use the existing requirement: distinguish what a source
+shows from who decided what should happen. New behavior need not have a baseline.
+Give the expected outcome and a nearby case requiring a different answer.
+Keep REMOVED Reason/Migration and RENAMED FROM/TO intact. A pure rename
+adds no rule. For a removal or cross-cutting change, specify any changed outcome
+in the affected surviving capability and reference the shared decision.
+
+- Under `### Requirement:` write bare lines `Rule: BR-LIMIT` and `Decision: approved`
+  (or `proposed` / `blocked`). Every visible `#### Scenario:` in a material
+  requirement needs exactly one unique, bare `Scenario ID: AC-OVER` line. This
+  includes the boundary case and scenarios in a consuming requirement. A prose
+  line like `Decision: keep the existing copy` does not opt in a requirement
+  without rule or scenario metadata. The exact values `approved`, `proposed`,
+  and `blocked` are reserved declarations and require a `Rule`. For a shared definition use
+  `Rule reference: BR-LIMIT => policies/limits.md#limit` instead of redefining it.
+  The target must be a regular Markdown file outside the change in the same repo;
+  its `### Requirement: Limit {#limit}` must define that rule and decision directly.
+  The guard binds the referenced file's bytes. An ordinary citation or URL may
+  explain provenance but is neither resolved by this wire nor proof of behavior.
+  If the same change also modifies the defining capability, put the full
+  requirement under `## MODIFIED Requirements` in `specs/<capability>/spec.md`.
+  Other capabilities still reference the anchored baseline, for example
+  `Rule reference: BR-LIMIT => openspec/specs/<capability>/spec.md#limit`.
+  The guard uses the modified decision and scenarios only when the baseline
+  capability path, the full case-sensitive requirement heading (including
+  `{#limit}`, after trimming), and the BR ID match. It still binds both files
+  to the candidate. Preserve the scenario names OpenSpec requires for archive
+  or use its removal workflow; the guard checks scenario IDs and coverage for
+  the effective rule, not whether OpenSpec will apply the delta.
+- In `plan.md` add `Bridge rule contract: 1` alongside the task marker. Under each
+  materially linked task use one bare `Rule scenario: BR-LIMIT => AC-OVER` per pair
+  and one `Rule readiness: ready` or `Rule readiness: blocked`. Cover every local
+  declared scenario. Record a shared gap once: resolver, affected IDs and what
+  permits resumption. A proposed or blocked decision blocks its tasks; no status
+  grants execution. Leave blocked tasks unchecked.
+- Ask: could incompatible implementations both pass these scenarios? Would the
+  implementer have to invent policy? If either answer is yes, refine the affected
+  decision or scenario. For each pair, test the approved outcome with TDD and link
+  observed RED/GREEN to this candidate. In the task’s `evidence.json` record add
+  `"rule_scenarios":[{"rule":"BR-LIMIT","scenario":"AC-OVER","proof":"policy_test"}]`,
+  one entry per pair. Characterization alone cannot prove intended policy.
+
+Before dispatch, remove `rule_blocked_tasks` from the DAG's dependency-ready
+IDs and exclude all their transitive consumers. Recompute the independent batch
+from remaining ready IDs, respecting reservations, actual inputs, resource and
+write conflicts, and grants. Leave the DAG unchanged; `Next front` alone is
+insufficient. A localized block can pass planning but prevents final verification.
+
+Execution consumes and rechecks the approved plan. If a material input, decision,
+or scope is missing, return the affected front to planning for refinement. Keep
+unaffected work eligible when independently ready, free of conflicts, and
+authorized; do not bypass a failed guard. Neither checker replaces Superpowers
+or native orchestration.
+
+## Task dependency projection
+
+For each task section headed `## Task 1.2` or `## Task 1.2: Title` in
+`plan.md`, write exactly one top-level line in one of these forms:
+
+```md
+- Depends on: none
+- Depends on: 1.1, 1.2
+```
+
+The second form lists existing stable task IDs separated by comma and space;
+use it instead of `none`, not alongside it. For example, this excerpt shows
+just the dependency lines in two task sections:
+
+```md
+## Task 1.1: Prepare input
+- Depends on: none
+
+## Task 1.2: Consume input
+- Depends on: 1.1
+```
+
+The DAG is derived from the plan and task checkboxes, not a new source of
+authority. For multitask work, present the ASCII DAG, a task table, and the next
+front by default. Generate the ASCII projection (the default) or optionally
+Mermaid from the same generator:
+
+```sh
+python3 -B "<bundle>/scripts/task_dag.py" --change "<change-dir>"
+python3 -B "<bundle>/scripts/task_dag.py" --change "<change-dir>" --format mermaid
+```
+
+The generator writes to stdout only by default; it does not update the plan,
+checkboxes, or other files. On resumption, recompute from the current sources;
+show the view again only if dependencies, checkbox state, or the next front
+changed. A missing dependency line in a
+legacy plan means unknown, not `none`; a declaration inside an HTML comment
+does not count. The legacy DAG also reads described task checkboxes with up to
+three leading spaces; marked plans still require top-level task checkboxes.
+A checked `[x]` records task state, not acceptance, authorization, or proof of
+safe parallelism. Even independent graph nodes can conflict over files or other
+resources: check those conflicts and grants separately before dispatch. In the
+ASCII table, `checked` means marked with consistent declared predecessors;
+`ready` means an open checkbox with all declared ancestors consistently marked;
+`blocked` means a predecessor is unsatisfied; `unknown` means no declaration;
+`inconsistent` means marked despite an unsatisfied predecessor. In the legacy
+view, `Next front` lists all `ready` IDs and makes no resource claim. `[~]`
+neither proves execution nor releases a successor.
+
+For marked plans, `Dependency ready` shows all ready IDs. `Declared conflicts`
+reports shared write paths (including a declared path and its descendants) and
+shared resource IDs across tasks, separately from DAG edges. `Next front` is a
+deterministic batch: reserve all `[~]` claims, then consider ready IDs in numeric
+order and skip any that collide with a reservation or a selected ID. Mermaid
+reports the same batch and collisions as comments, never as edges. The batch
+covers declared conflicts only. Read the plan and check actual inputs, claims,
+and grants before dispatch. Both tools use regular UTF-8 artifacts of at most
+4 MiB each and refuse symlinked artifacts and special files.
 
 ## Migration from v1
 

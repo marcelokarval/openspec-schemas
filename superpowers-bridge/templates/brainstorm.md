@@ -1,6 +1,11 @@
 <!--
 Raw capture of superpowers:brainstorming output.
 
+If two readings change what someone receives, may do, or can accept, name that
+person and contrast the outcomes. Cite the observation separately from who may
+decide the rule and what they decided. A greenfield proposal needs no invented
+current behavior. A wording edit with the same effect needs no rule record.
+
 本檔原樣捕捉 brainstorming skill 的產出，不強制結構。
 Skill 的自然產出通常是 decision log 格式（背景 → 決議鏈 Q1-Qn → 設計取捨），
 但依對話內容可能有不同組織方式。

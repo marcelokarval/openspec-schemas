@@ -8,9 +8,17 @@ from pathlib import Path
 import re
 import stat
 import subprocess
+import sys
+
+# The guard is read-only even when called without python -B.
+sys.dont_write_bytecode = True
 
 
 class Invalid(Exception):
+    pass
+
+
+class InvalidContract(Invalid):
     pass
 
 
@@ -103,17 +111,230 @@ def visible(text):
     return out
 
 
-def section(lines, name):
-    found = [i for i, line in enumerate(lines) if line.strip() == '## ' + name]
+def section(lines, name, *, marked=False):
+    heading = r'^ {0,3}#{1,2}[ \t]' if marked else r'^#{1,2}\s'
+    found = [i for i, line in enumerate(lines)
+             if line.strip() == '## ' + name and (not marked or re.match(heading, line))]
     if len(found) != 1:
         raise Invalid()
     start = found[0] + 1
-    end = next((i for i in range(start, len(lines)) if re.match(r'^#{1,2}\s', lines[i])), len(lines))
-    return [x.strip() for x in lines[start:end] if x.strip()]
+    end = next((i for i in range(start, len(lines)) if re.match(heading, lines[i])), len(lines))
+    values = [x for x in lines[start:end] if x.strip()]
+    if marked and any(re.match(r'^(?: {4}| {0,3}\t)', x) for x in values):
+        raise InvalidContract('verify.md: required sections must use visible Markdown, not indented code')
+    return [x.strip() for x in values]
 
 
 def nonempty(value):
     return isinstance(value, str) and bool(value.strip()) and not re.search(r'\b(?:fail(?:ed)?|not verified|blocked|pending)\b', value, re.I)
+
+
+# A lexical prefix only selects the Markdown parser. That parser still decides
+# visibility, valid syntax, duplicates and version. Ordinary prose is standalone.
+TASK_PREFIX = re.compile(rb'^ {0,3}Bridge[ \t]+task[ \t]+contract[ \t]*:', re.I)
+# Keep the standalone legacy guard aligned with task_dag's inline-link exception.
+LEGACY_TASK_ITEM = re.compile(r'^\s*-\s*(?=\[)')
+TASK_DOC_LINK = re.compile(
+    r'\[(?![ xX~]?\])[^\]\r\n]+\]'
+    r'(?:\[[^\[\]\r\n]*\]|\((?:<[^<>\r\n]+>|[^ \t<>]+)'
+    r"""(?:[ \t]+(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\((?:\\.|[^)\\])*\)))?\))"""
+)
+RULE_PREFIX = re.compile(rb'^ {0,3}(?:Bridge[ \t]+rule[ \t]+contract|(?:[-+*][ \t]+)?Rule[ \t]+(?:scenario|readiness))[ \t]*:', re.I)
+
+
+def has_prefix(data, pattern):
+    for line in data.removeprefix(b'\xef\xbb\xbf').replace(b'\r', b'\n').split(b'\n'):
+        # A complete inline comment can separate tokens but never join them.
+        if b'<!--' in line:
+            parts = []
+            start = 0
+            while (pos := line.find(b'<!--', start)) >= 0:
+                end = line.find(b'-->', pos + 4)
+                if end < 0:
+                    break
+                parts.extend((line[start:pos], b' '))
+                start = end + 3
+            line = b''.join((*parts, line[start:]))
+        if pattern.match(line):
+            return True
+    return False
+
+
+def contract_inputs(plan_bytes, tasks_bytes, *, required=False):
+    if not has_prefix(plan_bytes, TASK_PREFIX):
+        if required:
+            raise InvalidContract('plan.md: bridge task contract marker required for planning')
+        return None
+    from task_dag import ContractError, decode_artifact, marked_contract, read_contract
+
+    try:
+        if not marked_contract(decode_artifact(plan_bytes, errors='replace')):
+            if required:
+                raise InvalidContract('plan.md: bridge task contract marker required for planning')
+            return None
+        plan_text = decode_artifact(plan_bytes)
+        _, checkboxes, _ = read_contract(plan_text, decode_artifact(tasks_bytes))
+        return plan_text, checkboxes
+    except ContractError as error:
+        raise InvalidContract(str(error)) from error
+
+
+def auxiliary_file_link(root, parent, parent_fd, name):
+    """Classify metadata inside root without opening the link or reading its target."""
+    target = root / parent / os.readlink(name, dir_fd=parent_fd)
+    if not target.is_relative_to(root):
+        return False
+    parts = target.relative_to(root).parts
+    if not parts or parts[-1] == '..' or len(parts) > 128:
+        return False
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    stack = [os.open(root, flags)]
+    try:
+        for part in parts[:-1]:
+            if part == '..':
+                if len(stack) == 1:
+                    return False
+                os.close(stack.pop())
+            else:
+                stack.append(os.open(part, flags, dir_fd=stack[-1]))
+        mode = os.stat(parts[-1], dir_fd=stack[-1], follow_symlinks=False).st_mode
+        return stat.S_ISREG(mode)
+    except FileNotFoundError:
+        # A dangling auxiliary link, like an absent diagram, has no spec subtree.
+        return True
+    finally:
+        for fd in reversed(stack):
+            os.close(fd)
+
+
+def spec_inputs(root, prefix):
+    """Walk only specs/, using directory descriptors throughout (no symlink traversal)."""
+    result = {}
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    entries = size = 0
+
+    def walk(fd, path, depth):
+        nonlocal entries, size
+        with os.scandir(fd) as children:
+            for child in children:
+                entries += 1
+                if entries > 8192 or depth > 32:
+                    raise InvalidContract('specs/: directory search limit exceeded')
+                name = path + '/' + child.name
+                if child.is_symlink():
+                    if child.name != 'spec.md' and auxiliary_file_link(root, path, fd, child.name):
+                        continue
+                    raise InvalidContract('specs/: linked specs, directories or unclassifiable targets are not supported')
+                if child.is_dir(follow_symlinks=False):
+                    sub = os.open(child.name, flags, dir_fd=fd)
+                    try:
+                        walk(sub, name, depth + 1)
+                    finally:
+                        os.close(sub)
+                elif child.name == 'spec.md':
+                    data = safe_read(root, name)
+                    size += len(data)
+                    if len(result) >= 512 or size > 32 * 1024 * 1024:
+                        raise InvalidContract('specs/: spec input limit exceeded')
+                    result[name] = data
+
+    fd = os.open(root, flags)
+    path = prefix + 'specs'
+    try:
+        for part in path.split('/'):
+            if part in ('', '.', '..'):
+                raise Invalid()
+            try:
+                sub = os.open(part, flags, dir_fd=fd)
+            except FileNotFoundError:
+                raise InvalidContract('specs/: missing spec.md') from None
+            os.close(fd)
+            fd = sub
+        walk(fd, path, 0)
+    finally:
+        os.close(fd)
+    if not result:
+        raise InvalidContract('specs/: missing spec.md')
+    return result
+
+
+def rule_inputs(plan, marked, specs, load, *, change, repo, spec_prefix=''):
+    if not has_prefix(plan, RULE_PREFIX):
+        return None
+    from rule_contract import plan_marker, validate
+    from task_dag import ContractError
+    try:
+        if not plan_marker(plan):
+            return None
+        if marked is None:
+            raise ContractError('plan.md: Bridge task contract: 1 required with rule contract')
+        if not spec_prefix:
+            specs = spec_inputs(change, '')
+        baseline_prefix = None
+        if repo is not None and change.parent.name == 'changes' and change.parent.parent.name == 'openspec':
+            repo_root = Path(repo).absolute()
+            if change.parent.parent.is_relative_to(repo_root):
+                baseline_prefix = change.parent.parent.relative_to(repo_root).as_posix() + '/'
+        return validate(*marked, specs, load, spec_prefix=spec_prefix, baseline_prefix=baseline_prefix)
+    except ContractError as error:
+        raise InvalidContract(str(error)) from error
+
+
+def rule_loader(repo, change, external, manifest_data=None):
+    total = 0
+    root = None
+
+    def load(path):
+        nonlocal total, root
+        if repo is None:
+            raise InvalidContract('Rule reference requires planning --repo <repository root>')
+        if root is None:
+            root = Path(repo).absolute()
+            if (root.resolve(strict=True) != root or root == change or not change.is_relative_to(root)
+                    or Path(git(root, 'rev-parse', '--show-toplevel')) != root):
+                raise InvalidContract('Rule reference requires the containing Git repository root')
+        if (root / path).is_relative_to(change):
+            raise InvalidContract('Rule reference must point outside the consuming change')
+        try:
+            if manifest_data is not None and path in manifest_data:
+                entry = manifest_data[path]
+                if entry[:1] != b'\x01':
+                    raise Invalid()
+                data = entry[1:]
+            else:
+                data = safe_read(root, path)
+        except (OSError, Invalid):
+            raise InvalidContract(f'Rule reference: cannot safely read {path}') from None
+        total += len(data)
+        if len(external) >= 64 or total > 16 * 1024 * 1024:
+            raise InvalidContract('Rule reference input limit exceeded')
+        external[path] = data
+        return data
+    return load
+
+
+def planning(change, repo):
+    root = Path(change).absolute()
+    if root.resolve(strict=True) != root:
+        raise Invalid()
+    plan = safe_read(root, 'plan.md')
+    marked = contract_inputs(plan, safe_read(root, 'tasks.md'), required=True)
+    policy = rule_inputs(plan, marked, {}, rule_loader(repo, root, {}), change=root, repo=repo)
+    return {'status': 'ok', 'notice': 'structure only; not execution, authorization or acceptance',
+            **(policy.result() if policy else {})}
+
+
+def marked_verify_lines(plan_text, root, report_path):
+    from task_dag import ContractError, contract_lines, decode_artifact, pending_checkbox
+
+    try:
+        for number, line in contract_lines(plan_text):
+            if pending_checkbox(line):
+                raise InvalidContract(f'plan.md:{number}: pending plan checkbox')
+        report = decode_artifact(safe_read(root, report_path))
+        return [line for _, line in contract_lines(report, 'verify.md')]
+    except ContractError as error:
+        raise InvalidContract(str(error)) from error
 
 
 def run(args):
@@ -139,45 +360,62 @@ def run(args):
         raise Invalid()
     if any(p.startswith(rel + '/') or p == rel for p in paths):
         raise Invalid()
-    specs_dir = root / rel / 'specs'
-    specs = []
-    for parent, dirs, files in os.walk(specs_dir, followlinks=False):
-        if any((Path(parent) / d).is_symlink() for d in dirs):
-            raise Invalid()
-        if 'spec.md' in files:
-            specs.append((Path(parent) / 'spec.md').relative_to(root).as_posix())
-    if not specs or len(specs) > 512:
-        raise Invalid()
-    contents = {p: safe_read(root, p) for p in set(required + specs + [manifest_path])}
+    specs = spec_inputs(root, rel + '/')
+    contents = {p: safe_read(root, p) for p in required}
+    contents.update(specs)
+    contents[manifest_path] = manifest_bytes
     for entry in entries_manifest:
         path, state = entry['path'], entry['state']
         is_absent = absent(root, path)
         if args.command != 'preflight' and is_absent != (state == 'absent'):
             raise Invalid()
         contents[path] = b'\x00' if is_absent else b'\x01' + safe_read(root, path)
-    if any(not contents[p].strip() for p in required + specs):
+    if any(not contents[p].strip() for p in required + list(specs)):
         raise Invalid()
-    tasklines = visible(contents[rel + '/tasks.md'].decode())
-    entries = [re.fullmatch(r'\s*-\s*\[([ xX~])\]\s+(\d+\.\d+)\s+\S.*', line) for line in tasklines if re.match(r'^\s*-\s*\[', line)]
-    if not entries or any(x is None for x in entries):
-        raise Invalid()
-    ids = [x.group(2) for x in entries]
-    if len(ids) != len(set(ids)):
-        raise Invalid()
+    plan_bytes, tasks_bytes = (contents[rel + '/' + name] for name in ('plan.md', 'tasks.md'))
+    marked = contract_inputs(plan_bytes, tasks_bytes)
+    external = {}
+    policy = rule_inputs(plan_bytes, marked, specs, rule_loader(root, change, external, contents),
+                         change=change, repo=root, spec_prefix=rel + '/')
+    for path, data in external.items():
+        contents.setdefault(path, b'\x01' + data)
+    if marked is not None:
+        plan_text, checkboxes = marked
+        ids = list(checkboxes)
+        marks = [checkboxes[task_id][0] for task_id in ids]
+    else:
+        tasklines = visible(tasks_bytes.decode())
+        entries = [re.fullmatch(r'\s*-\s*\[([ xX~])\]\s+(\d+\.\d+)\s+\S.*', line)
+                   for line in tasklines if (prefix := LEGACY_TASK_ITEM.match(line))
+                   and not TASK_DOC_LINK.match(line, prefix.end())]
+        if not entries or any(x is None for x in entries):
+            raise Invalid()
+        ids = [x.group(2) for x in entries]
+        if len(ids) != len(set(ids)):
+            raise Invalid()
+        marks = [x.group(1).lower() for x in entries]
     digest = hashlib.sha256((base + '\0' + head + '\0').encode())
     for path, data in sorted(contents.items()):
         raw = path.encode()
         digest.update(len(raw).to_bytes(8, 'big') + raw + len(data).to_bytes(8, 'big') + data)
     candidate = digest.hexdigest()
     if args.command == 'verify':
-        if any(x.group(1).lower() != 'x' for x in entries):
+        if policy and policy.blocked:
+            raise InvalidContract('verify: rule-blocked tasks: ' + ', '.join(policy.blocked))
+        if any(mark != 'x' for mark in marks):
             raise Invalid()
-        plan = visible(contents[rel + '/plan.md'].decode())
-        plan_ids = re.findall(r'^## Task (\d+\.\d+)(?=[:\s]|$)', '\n'.join(plan), re.M)
-        if sorted(plan_ids) != sorted(ids) or any(re.match(r'^\s*-\s*\[\s*[~ ]\s*\]', x) for x in plan):
-            raise Invalid()
-        lines = visible(safe_read(root, rel + '/verify.md').decode())
-        if section(lines, 'Candidate') != [candidate] or section(lines, 'Mandatory checks') != ['- [x] structural', '- [x] tests', '- [x] review'] or section(lines, 'Overall Decision') != ['- [x] PASS']:
+        if marked is not None:
+            lines = marked_verify_lines(plan_text, root, rel + '/verify.md')
+        else:
+            plan_lines = visible(plan_bytes.decode())
+            plan_ids = re.findall(r'^## Task (\d+\.\d+)(?=[:\s]|$)', '\n'.join(plan_lines), re.M)
+            if sorted(plan_ids) != sorted(ids) or any(re.match(r'^\s*-\s*\[\s*[~ ]\s*\]', x) for x in plan_lines):
+                raise Invalid()
+            lines = visible(safe_read(root, rel + '/verify.md').decode())
+        strict_report = marked is not None
+        if (section(lines, 'Candidate', marked=strict_report) != [candidate]
+                or section(lines, 'Mandatory checks', marked=strict_report) != ['- [x] structural', '- [x] tests', '- [x] review']
+                or section(lines, 'Overall Decision', marked=strict_report) != ['- [x] PASS']):
             raise Invalid()
         if any(re.search(r'\b(?:FAIL|NOT VERIFIED|BLOCKED|PENDING)\b', line, re.I) for line in lines):
             raise Invalid()
@@ -188,7 +426,17 @@ def run(args):
         if not isinstance(records, list) or len(records) != len(ids):
             raise Invalid()
         for record in records:
-            if not isinstance(record, dict) or set(record) != {'id', 'plan', 'red', 'green'} or record['id'] != record['plan']:
+            if not isinstance(record, dict) or not isinstance(record.get('id'), str):
+                raise Invalid()
+            if policy:
+                from task_dag import ContractError
+                try:
+                    extra = policy.evidence(record)
+                except ContractError as error:
+                    raise InvalidContract(str(error)) from error
+            else:
+                extra = set()
+            if set(record) != {'id', 'plan', 'red', 'green'} | extra or record['id'] != record['plan']:
                 raise Invalid()
             for kind in ('red', 'green'):
                 item = record[kind]
@@ -204,16 +452,22 @@ def run(args):
         if not isinstance(review, dict) or set(review) != {'reviewer', 'status', 'candidate'} or not nonempty(review['reviewer']) or review['status'] != 'pass' or review['candidate'] != candidate:
             raise Invalid()
     return {'status': 'ok', 'base': base, 'head': head, 'candidate': candidate,
-            'notice': 'self-reported records are not independent proof'}
+            'notice': 'self-reported records are not independent proof', **(policy.result() if policy else {})}
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('command', choices=['preflight', 'candidate', 'verify'])
+    parser.add_argument('command', choices=['planning', 'preflight', 'candidate', 'verify'])
     for name in ('repo', 'base', 'change'):
-        parser.add_argument('--' + name, required=True)
+        parser.add_argument('--' + name, required=name == 'change')
+    args = parser.parse_args()
+    if args.command != 'planning' and (args.repo is None or args.base is None):
+        parser.error('the following arguments are required: --repo, --base')
     try:
-        result = run(parser.parse_args())
+        result = planning(args.change, args.repo) if args.command == 'planning' else run(args)
+    except InvalidContract as error:
+        print(json.dumps({'status': 'error', 'message': str(error)}))
+        return 1
     except (Invalid, OSError, UnicodeError, ValueError, TypeError, KeyError, subprocess.TimeoutExpired):
         print(json.dumps({'status': 'error', 'message': 'invalid, missing, incomplete or stale input'}))
         return 1

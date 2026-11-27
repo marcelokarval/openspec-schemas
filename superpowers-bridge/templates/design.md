@@ -16,6 +16,8 @@ brainstorm.md 記錄了探索過程（替代方案 + 選定方向）；
 
 ## Decisions
 
+<!-- Reference the rule's canonical section. Separate observed behavior and its source from decision, authority and status. Describe where consumers enforce the decision. -->
+
 <!--
 所有技術決策的唯一來源（single source of truth）。
 brainstorm.md 的 Agreed Approach 記錄了「選了哪條路」，
@@ -46,4 +48,4 @@ Format: [Risk] <描述> → Mitigation: <緩解措施>
 
 ## Open Questions
 
-<!-- Outstanding decisions or unknowns to resolve -->
+<!-- For a missing decision or missing proof, record the gap once, its resolver, affected tasks and the evidence or decision needed to resume. Other consumers reference it. -->
