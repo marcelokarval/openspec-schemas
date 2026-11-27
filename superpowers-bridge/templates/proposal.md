@@ -15,6 +15,11 @@ Explain the motivation for this change. What problem does this solve? Why now?
 <!--
 Describe what will change. Be specific about new capabilities, modifications, or removals.
 
+For a material effect, identify the consumer, the changed outcome and the canonical
+section. For a cross-cutting change, name the affected capabilities and their
+distinct outcomes. Refer consumers to one decision; do not create policy for
+unchanged behavior or turn a tooling convention into a product requirement.
+
 對於有明確前後對比的行為變更，使用 From/To 格式（markdown 無 inline diff）：
 
 **<Section or Behavior Name>**

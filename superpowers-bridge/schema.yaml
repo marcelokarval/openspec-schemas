@@ -13,6 +13,10 @@ artifacts:
       for example brainstorming or superpowers:brainstorming. Record the mapping
       and actual invocation. If unavailable STOP; discovery is not execution.
       Capture the approved discussion in this change's brainstorm.md.
+      Select material rules by effect: would two readings change an outcome,
+      permission or acceptance? Show the difference and cite the source. Separate
+      observed behavior from the intended decision and its authority. For new
+      behavior say what is proposed without inventing a current baseline.
     requires: []
   - id: proposal
     generates: proposal.md
@@ -20,6 +24,8 @@ artifacts:
     template: proposal.md
     instruction: |
       Create the proposal from brainstorm.md, including exact capability names.
+      Name the affected consumer and outcome. Editorial changes with no new
+      effect need no rule declaration. Reuse the canonical section for shared rules.
     requires: [brainstorm]
   - id: design
     generates: design.md
@@ -27,6 +33,9 @@ artifacts:
     template: design.md
     instruction: |
       Organize the decisions, goals, trade-offs and migration from brainstorm.md.
+      Locate each unresolved rule or proof gap: name the resolver, affected
+      consumers and the decision or evidence needed to resume. Reference a
+      shared gap once; leave independent work eligible.
     requires: [brainstorm]
   - id: specs
     generates: "specs/**/*.md"
@@ -37,6 +46,13 @@ artifacts:
       requirements and testable scenarios. Follow the template's ADDED,
       MODIFIED, REMOVED and RENAMED delta semantics including full modified
       requirements, Reason/Migration for removals and FROM/TO for renames.
+      For a material rule use the template's Rule and Decision lines, or a Rule
+      reference to its canonical definition. Give each material scenario a
+      stable Scenario ID. Specify the outcome and a nearby case requiring a
+      different response; explain which condition changes the answer. Keep
+      REMOVED Reason/Migration and RENAMED FROM/TO intact. A pure rename adds no
+      policy. If a removal or cross-cutting change alters a surviving consumer's
+      outcome, specify that outcome there and reference its canonical decision.
     requires: [proposal]
   - id: tasks
     generates: tasks.md
@@ -55,7 +71,44 @@ artifacts:
       invoke it, and record the mapping and invocation. STOP if unavailable.
       Preserve artifact ownership; write this change's plan.md. Map micro-steps
       to stable task IDs, with RED/GREEN commands and candidate review evidence.
-      Do not automatically commit.
+      Decompose, review and refine during planning: one independently verifiable
+      outcome per task. Keep supporting steps with that outcome. Preserve stable
+      IDs and proven progress; assign new IDs to new work and update affected
+      references in both artifacts. tasks.md stays the canonical checklist; do not
+      create task files or another tracker.
+      For a new plan keep Bridge task contract: 1. Fill every microcontract under
+      its ## Task X.Y heading: outcome, owner/resolver, other inputs, dependency
+      IDs and exact needed outputs, produced output, exact write paths and
+      exclusions, shared resource IDs, acceptance, stop and resume conditions.
+      Give each edge one Needs: ID => output-id matching the predecessor's
+      Produces. Declare none explicitly only where the template permits it.
+      For material effects add the rule marker and link each affected task to
+      its rule/scenario pairs and readiness as in the template. At review ask:
+      Could incompatible outcomes both pass the scenarios? Must the implementer
+      invent policy to proceed? If either is yes, refine the affected decision
+      or scenario before dispatch; proposed or blocked decisions grant nothing.
+      Before handoff and after refinement run:
+      python3 -B "<bundle>/scripts/bridge_guard.py" planning --change "<change-dir>"
+      When a spec uses Rule reference, use this command instead:
+      python3 -B "<bundle>/scripts/bridge_guard.py" planning --repo "<containing-git-root>" --change "<change-dir>"
+      Use the resolved bundle's README and guard --help for CLI arguments.
+      A new plan needs a valid marked contract; legacy format is not a planning
+      pass. Resolve material gaps in the affected front with its owner or define a
+      bounded investigation. Review semantic readiness separately from the guard.
+      For multitask work run python3 -B "<bundle>/scripts/task_dag.py" --change
+      "<change-dir>" with the resolved paths, then present the ASCII DAG, table and
+      next front by default; Mermaid from the same generator is optional.
+      On resumption, recompute from source; present again only if dependencies,
+      state or the next front changed.
+      For marked plans show dependency-ready IDs, declared collisions and the
+      next front separately. A marked [~] conservatively reserves declared claims;
+      it is not proof of execution. Collisions are not edges. Before dispatch,
+      exclude guard rule_blocked_tasks and their transitive consumers even if
+      dependency-ready. Recompute a compatible batch from the
+      remaining ready IDs using current reservations, writes, resources and grants;
+      do not edit the DAG. The read-only projection covers declared conflicts
+      only; it cannot authorize execution
+      or attest acceptance. Do not automatically commit.
     requires: [tasks]
   - id: verify
     generates: verify.md
@@ -74,6 +127,9 @@ artifacts:
       GREEN passed outcomes. Guard success validates format and
       freshness only for declared files, not completeness or the claims.
       A semantic review and human acceptance remain separate requirements.
+      For each linked scenario inspect its policy test and observed RED/GREEN
+      on this candidate. Record rule_scenarios in the task evidence; a source
+      citation or characterization of existing behavior cannot prove policy.
     requires: [plan]
   - id: retrospective
     generates: retrospective.md
@@ -89,7 +145,7 @@ apply:
   tracks: tasks.md
   instruction: |
     Select an already authorized repository workspace and explicit Git base.
-    Run python3 <bundle>/scripts/bridge_guard.py preflight --repo <repo>
+    Run python3 -B <bundle>/scripts/bridge_guard.py preflight --repo <repo>
     --base <base> --change <change>. Quote arguments in a shell. STOP if the
     named change or required artifacts are missing; do not reconstruct them.
     Workspace creation or transfer needs separate authorization and preflight.
@@ -98,6 +154,18 @@ apply:
     requesting-code-review. Confirm actual invocation, not only discovery.
     Subagent mode is supported when explicitly authorized. Inline execution may
     use executing-plans plus applicable TDD and review, subject to user grants.
+    On resumption recompute the multitask view from current plan and checklist:
+    python3 -B "<bundle>/scripts/task_dag.py" --change "<change-dir>". Report it
+    again only for a meaningful change of dependency, state, or next front.
+    Consume and recheck the approved plan before dispatch or inline execution.
+    Use the current preflight rule_blocked_tasks to exclude those IDs and their
+    transitive consumers even when the DAG says ready. Recompute the independent
+    batch with actual inputs, reservations, resources and grants; keep the DAG intact.
+    If a material decision, required input or scope is missing, return only the
+    affected front to planning for refinement and revalidation. Unaffected work
+    may proceed once independently ready, free of conflicts and authorized.
+    Never bypass a failed guard or rewrite an adequate contract during execution.
+    Neither guard nor projection replaces Superpowers or native orchestration.
     Execute plan steps against stable task IDs, recording RED/GREEN evidence.
     Verify the exact candidate and request independent review. Archive, release,
     human acceptance, commits, worktree creation, PR, push and merge are separate

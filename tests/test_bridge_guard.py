@@ -4,6 +4,8 @@ import subprocess
 import tempfile
 import unittest
 
+from test_task_dag import MARKER, microcontract
+
 GUARD = Path(__file__).resolve().parents[1] / 'superpowers-bridge/scripts/bridge_guard.py'
 
 
@@ -23,10 +25,11 @@ class BridgeGuardTest(unittest.TestCase):
         return subprocess.run(['git', '-C', str(self.repo), *args], check=True,
                               capture_output=True, text=True).stdout.strip()
 
-    def run_guard(self, command='preflight', base='custom-base', change=None):
-        proc = subprocess.run(['/usr/bin/python3', str(GUARD), command, '--repo', str(self.repo),
+    def run_guard(self, command='preflight', base='custom-base', change=None, script=GUARD):
+        proc = subprocess.run(['/usr/bin/python3', str(script), command, '--repo', str(self.repo),
                                '--base', base, '--change', str(change or self.change)],
                               capture_output=True, text=True)
+        self.assertTrue(proc.stdout, proc.stderr)
         return proc.returncode, json.loads(proc.stdout)
 
     def artifacts(self):
@@ -225,10 +228,197 @@ class BridgeGuardTest(unittest.TestCase):
     def test_shipped_plan_template_heading(self):
         self.artifacts()
         template = (GUARD.parents[1] / 'templates/plan.md').read_text()
-        (self.change / 'plan.md').write_text(template.replace('<!-- stable tasks.md ID -->', 'Implement feature'))
+        plan = self.change / 'plan.md'
+        plan.write_text(template.replace('<!-- stable tasks.md ID -->', 'Implement feature'))
+        self.assertNotEqual(self.run_guard('candidate')[0], 0, 'incomplete new template passed')
+        plan.write_text(MARKER + microcontract('1.1', writes='implementation.py'))
         digest = self.run_guard()[1]['candidate']
         self.verdict(digest)
         self.assertEqual(self.run_guard('verify')[0], 0)
+
+    def test_planning_needs_only_plan_and_tasks_and_does_not_write(self):
+        change = Path(self.tmp.name) / 'planning only'
+        change.mkdir()
+        (change / 'plan.md').write_text(MARKER + microcontract('1.1'))
+        (change / 'tasks.md').write_text('- [ ] 1.1 First\n')
+        before = {p.name: p.read_bytes() for p in change.iterdir()}
+        proc = subprocess.run(['/usr/bin/python3', str(GUARD), 'planning', '--change', str(change)],
+                              capture_output=True, text=True, timeout=5)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(json.loads(proc.stdout)['status'], 'ok')
+        self.assertEqual(before, {p.name: p.read_bytes() for p in change.iterdir()})
+        (change / 'plan.md').write_text(microcontract('1.1'))
+        proc = subprocess.run(proc.args, capture_output=True, text=True, timeout=5)
+        self.assertEqual(proc.returncode, 1, proc.stderr)
+        self.assertIn('contract marker', json.loads(proc.stdout)['message'])
+
+    def test_all_guard_phases_reject_incomplete_marked_contract(self):
+        self.artifacts()
+        plan = self.change / 'plan.md'
+        plan.write_text(MARKER + microcontract('1.1').replace('- Owner/resolver: Alice\n', ''))
+        self.verdict('obsolete')
+        for command in ('planning', 'preflight', 'candidate', 'verify'):
+            with self.subTest(command=command):
+                result, report = self.run_guard(command)
+                self.assertEqual(result, 1)
+                self.assertIn('task 1.1', report['message'])
+                self.assertIn('Owner/resolver', report['message'])
+
+    def test_all_guard_phases_reject_microcontract_field_inside_raw_html(self):
+        self.artifacts()
+        plan = microcontract('1.1').replace('- Owner/resolver: Alice\n',
+                                          '<pre>\n- Owner/resolver: Alice\n</pre>\n')
+        (self.change / 'plan.md').write_text(MARKER + plan)
+        _, report = self.run_guard('candidate')
+        self.verdict(report.get('candidate', 'no candidate'))
+        for command in ('planning', 'preflight', 'candidate', 'verify'):
+            with self.subTest(command=command):
+                result, report = self.run_guard(command)
+                self.assertEqual(result, 1)
+                self.assertIn('plan.md:', report['message'])
+                self.assertIn('raw HTML', report['message'])
+
+    def test_verify_rejects_unfinished_checkbox_with_noncanonical_bullet(self):
+        self.artifacts()
+        (self.change / 'plan.md').write_text(MARKER + microcontract('1.1'))
+        (self.change / 'tasks.md').write_text('- [x] 1.1 First\n* [ ] 1.2 Unfinished\n')
+        _, report = self.run_guard('candidate')
+        self.verdict(report.get('candidate', 'no candidate'))
+        result, report = self.run_guard('verify')
+        self.assertEqual(result, 1)
+        self.assertIn('tasks.md:2: expected a top-level checkbox', report['message'])
+
+    def test_marked_verify_requires_report_sections_in_visible_markdown(self):
+        self.artifacts()
+        (self.change / 'plan.md').write_text(MARKER + microcontract('1.1'))
+        digest = self.run_guard('candidate')[1]['candidate']
+        self.verdict(digest)
+        path = self.change / 'verify.md'
+        report = path.read_text()
+        for hidden in ('<pre>\n' + report + '## Footer\n</pre>\n',
+                       '<!--\n' + report + '## Footer\n-->\n',
+                       report.replace('\n' + digest + '\n', '\n    ' + digest + '\n')):
+            with self.subTest(start=hidden.splitlines()[0]):
+                path.write_text(hidden)
+                self.assertEqual(self.run_guard('verify')[0], 1)
+        path.write_text(report + '\n## Examples\n<!-- ## Candidate - [ ] FAIL -->\n'
+                        '```html\n<pre>\n## Overall Decision\n- [ ] FAIL\n</pre>\n```\n')
+        self.assertEqual(self.run_guard('verify')[0], 0)
+
+    def test_marked_verify_checks_pending_plan_steps_in_visible_markdown(self):
+        self.artifacts()
+        path = self.change / 'plan.md'
+        plan = MARKER + microcontract('1.1')
+        for pending in ('* [ ]', '+ [~]', '1. [ ]', '  > 1) + [ ]'):
+            with self.subTest(pending=pending):
+                path.write_text(plan + pending + ' Run mandatory acceptance fixture\n')
+                self.verdict(self.run_guard('candidate')[1]['candidate'])
+                self.assertEqual(self.run_guard('verify')[0], 1)
+        path.write_text(plan + '* [x] Ran fixture\n> 1. [X] Checked output\n'
+                        '+ [Fixture info](docs.md)\n<!-- 1. [ ] Example -->\n'
+                        '```md\n* [ ] Example\n```\n')
+        self.verdict(self.run_guard('candidate')[1]['candidate'])
+        self.assertEqual(self.run_guard('verify')[0], 0)
+
+    def test_marked_planning_rejects_duplicate_resource_field_with_extra_spacing(self):
+        self.artifacts()
+        (self.change / 'plan.md').write_text(MARKER + microcontract('1.1')
+                                            + '-  Shared resources: db:fixture\n')
+        result, report = self.run_guard('planning')
+        self.assertEqual(result, 1)
+        self.assertIn('Shared resources', report['message'])
+
+    def test_marked_verify_does_not_hide_pending_step_after_quoted_comment_opener(self):
+        self.artifacts()
+        (self.change / 'plan.md').write_text(MARKER + microcontract('1.1')
+                                            + 'The opener is `<!--`.\n'
+                                            + '- [ ] Run mandatory acceptance fixture\n'
+                                            + 'The closer is `-->`.\n')
+        _, report = self.run_guard('candidate')
+        self.verdict(report.get('candidate', 'no candidate'))
+        result, report = self.run_guard('verify')
+        self.assertEqual(result, 1)
+        self.assertIn('comment delimiter', report['message'])
+
+    def test_legacy_candidate_does_not_activate_contract_from_ordinary_prose(self):
+        self.artifacts()
+        plan = self.change / 'plan.md'
+        with plan.open('a') as stream:
+            stream.write('Bridge task contract details are tracked by the owner.\n')
+        result, report = self.run_guard('candidate')
+        self.assertEqual(result, 0, report)
+        self.verdict(report['candidate'])
+        self.assertEqual(self.run_guard('verify')[0], 0)
+
+    def test_candidate_marker_discovery_ignores_legacy_inline_comment_example(self):
+        self.artifacts()
+        path = self.change / 'plan.md'
+        example = 'Example: <!--\nBridge task contract: 1\n-->\n'
+        path.write_text(example + path.read_text())
+        result, report = self.run_guard('candidate')
+        self.assertEqual(result, 0, report)
+        path.write_text(example + MARKER + microcontract('1.1'))
+        result, report = self.run_guard('candidate')
+        self.assertEqual(result, 1)
+        self.assertIn('comment must close on the same line', report['message'])
+        path.write_text(MARKER + microcontract('1.1') + MARKER)
+        result, report = self.run_guard('candidate')
+        self.assertEqual(result, 1)
+        self.assertIn('duplicate bridge task contract marker', report['message'])
+
+    def test_marked_planning_accepts_indented_single_line_code_span(self):
+        self.artifacts()
+        (self.change / 'plan.md').write_text(MARKER + microcontract('1.1') + '  ```literal```\n')
+        result, report = self.run_guard('planning')
+        self.assertEqual(result, 0, report)
+
+    def test_marked_planning_rejects_escaped_comment_delimiter_before_extra_task(self):
+        self.artifacts()
+        (self.change / 'plan.md').write_text(MARKER + microcontract('1.1'))
+        (self.change / 'tasks.md').write_text('- [ ] 1.1 Existing task\n\nLiteral \\<!-- in prose.\n\n'
+                                              '- [ ] 1.2 Real extra task\n\nLiteral --> in prose.\n')
+        result, report = self.run_guard('planning')
+        self.assertEqual(result, 1)
+        self.assertIn('tasks.md:3: escaped comment delimiter', report['message'])
+
+    def test_marked_planning_rejects_ambiguous_comment_openers_before_extra_task(self):
+        self.artifacts()
+        (self.change / 'plan.md').write_text(MARKER + microcontract('1.1'))
+        for opener in ('Literal \\` then `<!--` in prose.', '    <!-- code example'):
+            with self.subTest(opener=opener):
+                (self.change / 'tasks.md').write_text('- [ ] 1.1 Existing task\n\n' + opener
+                                                      + '\n\n- [ ] 1.2 Visible\n\nLiteral --> in prose.\n')
+                result, report = self.run_guard('planning')
+                self.assertEqual(result, 1)
+                self.assertIn('tasks.md:3:', report['message'])
+
+    def test_marked_planning_rejects_multiline_inline_syntax_and_indented_fences(self):
+        self.artifacts()
+        (self.change / 'plan.md').write_text(MARKER + microcontract('1.1'))
+        for tail, diagnostic in (
+            ('  <!-- comment inside first item\n- [ ] 1.2 Extra top-level item\n\n-->\n',
+             'comment must close on the same line'),
+            ('The example starts `on this line\n<!-- literal -->\nand ends here`.\n',
+             'inline code must close on the same line'),
+            ('  ```\n- [ ] 1.2 Extra\n\n```\n', 'indented fence'),
+        ):
+            with self.subTest(diagnostic=diagnostic):
+                (self.change / 'tasks.md').write_text('- [ ] 1.1 Existing\n' + tail)
+                result, report = self.run_guard('planning')
+                self.assertEqual(result, 1)
+                self.assertIn('tasks.md:2:', report['message'])
+                self.assertIn(diagnostic, report['message'])
+
+    def test_legacy_guard_does_not_load_the_helper_for_ordinary_bridge_prose(self):
+        self.artifacts()
+        plan = self.change / 'plan.md'
+        plan.write_text('## Task 1.1\nImplement the bridge from the old route.\n')
+        script = Path(self.tmp.name) / GUARD.name
+        script.write_bytes(GUARD.read_bytes())
+        result, report = self.run_guard('candidate', script=script)
+        self.assertEqual(result, 0, report)
+        self.verdict(report['candidate'])
+        self.assertEqual(self.run_guard('verify', script=script)[0], 0)
 
     def test_add_modify_delete_lifecycle(self):
         self.artifacts()

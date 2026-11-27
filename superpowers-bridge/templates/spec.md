@@ -18,8 +18,15 @@ Delta spec template for a change.
 
 ### Requirement: <!-- requirement name -->
 <!-- requirement text — 須含 SHALL 或 MUST -->
+<!-- Material ADDED or MODIFIED requirement only: copy the applicable examples below as plain lines before the first scenario. Use stable unique IDs; state who decided, on what source, and why. -->
+<!-- Rule: BR-LIMIT -->
+<!-- Decision: approved -->
+<!-- Choose approved, proposed or blocked according to actual authority. Alternatively reference the canonical definition instead of repeating Rule and Decision: -->
+<!-- Rule reference: BR-LIMIT => policies/limits.md#limit -->
 
 #### Scenario: <!-- scenario name -->
+<!-- Scenario ID: AC-OVER -->
+<!-- For each material scenario put its ID here as a plain line. Pair the outcome with a nearby case that must differ (e.g. at the limit versus just over it); give that case its own ID. -->
 - **WHEN** <!-- condition -->
 - **THEN** <!-- expected outcome -->
 
@@ -54,6 +61,7 @@ Delta spec template for a change.
 
 ### Requirement: <!-- 要刪除的 header，與既有 spec 完全相同 -->
 
+<!-- Preserve Reason/Migration. If retiring this requirement changes what a surviving consumer must do, specify and test that effect under its ADDED or MODIFIED requirement. Do not turn the retired rule into active policy. -->
 **Reason**: <!-- 為何廢除 -->
 
 **Migration**: <!-- 既有呼叫方/依賴方應如何調整 -->
@@ -70,5 +78,6 @@ Delta spec template for a change.
 archive 時 apply 順序：RENAMED → REMOVED → MODIFIED → ADDED
 -->
 
+<!-- Keep FROM/TO unchanged for a pure rename. If behavior also changes, declare the rule in the full MODIFIED requirement under the new name. -->
 - FROM: `### Requirement: <Old Name>`
 - TO: `### Requirement: <New Name>`
