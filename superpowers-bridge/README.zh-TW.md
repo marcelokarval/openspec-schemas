@@ -79,7 +79,7 @@ HTML 註解與行內程式碼的起訖符號必須在同一行。多行範例或
 有標記的計畫中，每個任務微契約欄位須使用不縮排的 `-`；欄位名稱周圍的空格或 tab 不會
 改變欄位的識別。
 `tasks.md` 只接受頂層的 `- [ ] X.Y 說明` 格式及支援的勾選狀態，不接受其他清單符號
-或巢狀任務核取方塊。空白欄位、`TBD` 等占位符及互相矛盾的宣告也會被拒絕。
+或巢狀任務核取方塊。可並列 `- [Design](design.md)`、`- [Design](design.md "Design notes")` 或 `- [Design][notes]` 等文件連結；連結不會建立任務。請為 `notes` 提供 Markdown 參照定義；檢查器不解析連結目的地。空白欄位、`TBD` 等占位符及互相矛盾的宣告也會被拒絕。
 交付新計畫前及每次細化後執行：
 
 ```sh
@@ -103,7 +103,9 @@ CLI 參數以實際套件的 `scripts/bridge_guard.py --help` 為準。
 若兩種解讀會改變結果、權限或驗收條件，由代理在既有需求啟用規則契約。只改措辭而不改效果時，無須宣告。區分來源所顯示的現況、誰有權決定，以及決定的預期結果；全新行為不必虛構現況。列出預期結果及一個條件相近、結果卻必須不同的案例。
 保留 REMOVED 的 Reason/Migration 及 RENAMED 的 FROM/TO；只改名不新增規則。移除或跨能力變更若改變其他能力的結果，應在仍存續的對應需求描述新結果，並引用共用決策。
 
-- 在 `### Requirement:` 下以獨立純文字行寫 `Rule: BR-LIMIT` 與 `Decision: approved`（或 `proposed`、`blocked`）；每個實質 `#### Scenario:` 下各寫一行唯一的 `Scenario ID: AC-OVER`。共用規則改用 `Rule reference: BR-LIMIT => policies/limits.md#limit`，不重複定義。目標必須是同一 repository 內、變更目錄外的一般 Markdown 檔；其中 `### Requirement: Limit {#limit}` 須直接定義同一規則及決策。guard 將引用檔的位元組納入 candidate 摘要；一般引文或網址只交代出處，不會自動解析，也不能證明實作結果。
+- 在 `### Requirement:` 下以獨立純文字行寫 `Rule: BR-LIMIT` 與 `Decision: approved`（或 `proposed`、`blocked`）；實質需求中的每個可見 `#### Scenario:` 都必須恰有一行獨立、唯一的 `Scenario ID: AC-OVER`，包括邊界案例與引用規則的需求中的情境。沒有規則或情境中繼資料的需求中，`Decision: keep the existing copy` 等一般文字不會啟用契約。`approved`、`proposed`、`blocked` 是保留值，若直接填為 `Decision` 的值就必須有 `Rule`。共用規則改用 `Rule reference: BR-LIMIT => policies/limits.md#limit`，不重複定義。目標必須是同一 repository 內、變更目錄外的一般 Markdown 檔；其中 `### Requirement: Limit {#limit}` 須直接定義同一規則及決策。guard 將引用檔的位元組納入 candidate 摘要；一般引文或網址只交代出處，不會自動解析，也不能證明實作結果。
+  若同一變更也修改定義規則的能力，請在 `specs/<capability>/spec.md` 的 `## MODIFIED Requirements` 下寫出完整需求。其他能力仍引用有錨點的基準規格，例如 `Rule reference: BR-LIMIT => openspec/specs/<capability>/spec.md#limit`。
+  只有基準規格的能力路徑、去除首尾空白後區分大小寫的完整需求標題（含 `{#limit}`）及 BR ID 都相同時，guard 才使用修改後的決策與情境，並仍將兩份檔案納入 candidate 摘要。保留 OpenSpec 歸檔要求的情境名稱，或走其移除流程；guard 檢查有效規則的情境 ID 和覆蓋，不保證 OpenSpec 能套用差異規格。
 - 在 `plan.md` 的任務標記旁加上 `Bridge rule contract: 1`。只在受規則影響的任務內，以純文字逐對寫 `Rule scenario: BR-LIMIT => AC-OVER`，並寫一行 `Rule readiness: ready` 或 `Rule readiness: blocked`；涵蓋所有本地宣告的規則情境。共用缺口只記一次，註明解決人、受影響 ID 與恢復條件。規則仍為 proposed 或 blocked 時，其任務必須標為 blocked 且不得勾選完成；任何狀態都不授予執行權。
 - 審查時問：結果互斥的兩種實作能否同時通過這些情境？實作者是否必須自行制定政策？任一為是，就先細化受影響的決策或情境。每對規則及情境以 TDD 測試已決定的結果，在同一 candidate 記錄實際 RED/GREEN；於 `evidence.json` 的對應任務加上 `"rule_scenarios":[{"rule":"BR-LIMIT","scenario":"AC-OVER","proof":"policy_test"}]`，每對一筆。只描述既有行為的測試不足以證明政策。
 
@@ -123,7 +125,7 @@ python3 -B '<bundle>/scripts/task_dag.py' --change '<change-dir>' --format merma
 ```
 
 恢復時依目前計畫及清單重算；相依性、勾選狀態或下一批有變動才再次顯示。舊計畫
-缺少 `Depends on` 表示未知，不等於 `none`。舊版 `Next front` 顯示所有相依性已滿足的
+缺少可見的 `Depends on` 表示未知，不等於 `none`；HTML 註解內的宣告不算。舊版 DAG 也讀取最多縮排三格且附有說明的任務核取方塊；有標記的計畫仍要求頂層任務核取方塊。舊版 `Next front` 顯示所有相依性已滿足的
 待辦 ID，不判斷資源衝突。`[x]` 不代表驗收；`[~]` 不證明正在執行，也不會滿足後續相依性。
 
 有標記的計畫以 `Dependency ready` 列出相依性已滿足的任務；`Declared conflicts`

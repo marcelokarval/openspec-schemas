@@ -456,6 +456,52 @@ class BridgeGuardTest(unittest.TestCase):
         (self.change / 'candidate-manifest.json').write_text(json.dumps({'paths': [{'path': 'link/new.py', 'state': 'absent'}]}))
         self.assertNotEqual(self.run_guard('preflight')[0], 0)
 
+    def test_review_a6_task_index_links_do_not_break_guard(self):
+        self.artifacts()
+        for plan in ('## Task 1.1\nLegacy plan.\n', MARKER + microcontract('1.1')):
+            (self.change / 'plan.md').write_text(plan)
+            tasks = self.change / 'tasks.md'
+            tasks.write_text('- [Design](design.md)\n- [x] 1.1 Actual\n')
+            code, candidate = self.run_guard('candidate')
+            self.assertEqual(code, 0, candidate)
+            self.verdict(candidate['candidate'])
+            self.assertEqual(self.run_guard('verify')[0], 0)
+            tasks.write_text(tasks.read_text() + '- [?] 1.1 Invalid\n')
+            self.assertEqual(self.run_guard('candidate')[0], 1)
+
+    def test_adjust_a6_standalone_guard_accepts_markdown_link_variants(self):
+        self.artifacts()
+        script = self.repo / 'guard.py'
+        script.write_bytes(GUARD.read_bytes())
+        tasks = self.change / 'tasks.md'
+        for link in ('- [Design](design.md "Design notes")', '- [Design][notes]'):
+            with self.subTest(link=link):
+                index = link + '\n- [x] 1.1 Actual\n\n[notes]: design.md\n'
+                tasks.write_text(index)
+                code, candidate = self.run_guard('candidate', script=script)
+                self.assertEqual(code, 0, candidate)
+                self.verdict(candidate['candidate'])
+                self.assertEqual(self.run_guard('verify', script=script)[0], 0)
+                for bad in ('- [?] 1.1 [Design][notes]', '- [x] 1.1 Duplicate', '- [x][notes]'):
+                    tasks.write_text(index + bad + '\n')
+                    self.assertEqual(self.run_guard('candidate', script=script)[0], 1)
+
+
+    def test_adjust_a6_guard_links_allow_attached_prose_in_both_modes(self):
+        self.artifacts()
+        standalone = self.repo / 'guard.py'
+        standalone.write_bytes(GUARD.read_bytes())
+        for mode, plan, script in (('legacy', '## Task 1.1\nLegacy plan.\n', standalone),
+                                   ('marked', MARKER + microcontract('1.1'), GUARD)):
+            (self.change / 'plan.md').write_text(plan)
+            for link in ('[Design](design.md)', '[Design](design.md "Design notes")', '[Design][notes]'):
+                for suffix in ('.', ', for context', ' and see the notes'):
+                    with self.subTest(mode=mode, link=link, suffix=suffix):
+                        (self.change / 'tasks.md').write_text(
+                            f'- {link}{suffix}\n- [x] 1.1 Actual\n\n[notes]: design.md\n')
+                        code, report = self.run_guard('candidate', script=script)
+                        self.assertEqual(code, 0, report)
+
 
 if __name__ == '__main__':
     unittest.main()

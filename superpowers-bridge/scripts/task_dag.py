@@ -18,6 +18,14 @@ import unicodedata
 ID = r"[0-9]+\.[0-9]+"
 PLAN_TASK = re.compile(rf"##[ \t]+Task[ \t]+({ID})(?:[ \t]*:[ \t]*(.*))?[ \t]*$")
 CHECKBOX = re.compile(rf"-[ \t]+\[([ xX~])\][ \t]+({ID})(?:[ \t]+(.*))?[ \t]*$")
+# Up to three leading spaces are still a list item in legacy Markdown.
+LEGACY_INDENTED_BOX = re.compile(rf" {{1,3}}-[ \t]+\[([ xX~])\][ \t]+({ID})[ \t]+(\S.*)$")
+# A link label must not be one of the reserved checkbox marks.
+TASK_DOC_LINK = re.compile(
+    r'\[(?![ xX~]?\])[^\]\r\n]+\]'
+    r'(?:\[[^\[\]\r\n]*\]|\((?:<[^<>\r\n]+>|[^ \t<>]+)'
+    r"""(?:[ \t]+(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\((?:\\.|[^)\\])*\)))?\))"""
+)
 LIST_ITEM = r"[-+*]|[0-9]+[.)]"
 CHECKBOX_CANDIDATE = re.compile(rf"^\s*(?:(?:{LIST_ITEM})\s+|>\s*)*(?:{LIST_ITEM})\s*\[")
 PENDING_STATE = re.compile(r"([ \t~]+)\](?=[ \t]|$)")
@@ -139,20 +147,24 @@ def content_lines(text, *, contract=False, strict=False, artifact="plan.md"):
                 if not marker[2].strip(" \t"):
                     fence = None
             continue
-        if not contract and (comment or line.lstrip(" \t").startswith("<!--")):
-            comment = "-->" not in line
-            continue
-        if contract and comment:
+        if comment:
             _, close, suffix = line.partition("-->")
             if close:
-                _, comment = check_markup(suffix, number, allow_block=False)
+                # A permissive reader must keep a second opener on the same
+                # line. The closing line itself never supplies visible metadata.
+                if not strict:
+                    suffix = suffix.lstrip(" \t")
+                _, comment = check_markup(suffix, number, allow_block=not strict)
+            continue
+        if not contract and line.lstrip(" \t").startswith("<!--"):
+            _, comment = check_markup(line.lstrip(" \t"), number)
             continue
         if strict and line.startswith((" ", "\t")) and valid_fence_opener(FENCE.match(line.lstrip(" \t"))):
             raise ContractError(f"{artifact}:{number}: indented fence opener; start examples in column 0")
         if valid_fence_opener(marker):
             fence = marker[1]
             continue
-        if contract:
+        if contract or "<!--" in line:
             # Keep source line numbers; an inline comment cannot supply a field value.
             line, comment = check_markup(line, number)
         yield number, line
@@ -245,8 +257,13 @@ def read_checkboxes(text, *, marked=False):
     source = contract_lines(text, "tasks.md") if marked else content_lines(text)
     for number, line in source:
         match = CHECKBOX.fullmatch(line)
-        if marked and CHECKBOX_CANDIDATE.match(line) and (not match or not match[3] or not prose(match[3])):
-            raise ContractError(f"tasks.md:{number}: expected a top-level checkbox with a task ID and description")
+        if marked:
+            prefix = CHECKBOX_CANDIDATE.match(line)
+            if (prefix and not TASK_DOC_LINK.match(line, prefix.end() - 1)
+                    and (not match or not match[3] or not prose(match[3]))):
+                raise ContractError(f"tasks.md:{number}: expected a top-level checkbox with a task ID and description")
+        elif not match:
+            match = LEGACY_INDENTED_BOX.fullmatch(line)
         if match:
             mark, task_id, title = match.groups()
             if task_id in tasks:

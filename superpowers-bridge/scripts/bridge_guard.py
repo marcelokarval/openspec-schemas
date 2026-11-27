@@ -132,6 +132,13 @@ def nonempty(value):
 # A lexical prefix only selects the Markdown parser. That parser still decides
 # visibility, valid syntax, duplicates and version. Ordinary prose is standalone.
 TASK_PREFIX = re.compile(rb'^ {0,3}Bridge[ \t]+task[ \t]+contract[ \t]*:', re.I)
+# Keep the standalone legacy guard aligned with task_dag's inline-link exception.
+LEGACY_TASK_ITEM = re.compile(r'^\s*-\s*(?=\[)')
+TASK_DOC_LINK = re.compile(
+    r'\[(?![ xX~]?\])[^\]\r\n]+\]'
+    r'(?:\[[^\[\]\r\n]*\]|\((?:<[^<>\r\n]+>|[^ \t<>]+)'
+    r"""(?:[ \t]+(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\((?:\\.|[^)\\])*\)))?\))"""
+)
 RULE_PREFIX = re.compile(rb'^ {0,3}(?:Bridge[ \t]+rule[ \t]+contract|(?:[-+*][ \t]+)?Rule[ \t]+(?:scenario|readiness))[ \t]*:', re.I)
 
 
@@ -251,7 +258,7 @@ def spec_inputs(root, prefix):
     return result
 
 
-def rule_inputs(plan, marked, specs, load, planning_change=None):
+def rule_inputs(plan, marked, specs, load, *, change, repo, spec_prefix=''):
     if not has_prefix(plan, RULE_PREFIX):
         return None
     from rule_contract import plan_marker, validate
@@ -261,9 +268,14 @@ def rule_inputs(plan, marked, specs, load, planning_change=None):
             return None
         if marked is None:
             raise ContractError('plan.md: Bridge task contract: 1 required with rule contract')
-        if planning_change is not None:
-            specs = spec_inputs(planning_change, '')
-        return validate(*marked, specs, load)
+        if not spec_prefix:
+            specs = spec_inputs(change, '')
+        baseline_prefix = None
+        if repo is not None and change.parent.name == 'changes' and change.parent.parent.name == 'openspec':
+            repo_root = Path(repo).absolute()
+            if change.parent.parent.is_relative_to(repo_root):
+                baseline_prefix = change.parent.parent.relative_to(repo_root).as_posix() + '/'
+        return validate(*marked, specs, load, spec_prefix=spec_prefix, baseline_prefix=baseline_prefix)
     except ContractError as error:
         raise InvalidContract(str(error)) from error
 
@@ -307,7 +319,7 @@ def planning(change, repo):
         raise Invalid()
     plan = safe_read(root, 'plan.md')
     marked = contract_inputs(plan, safe_read(root, 'tasks.md'), required=True)
-    policy = rule_inputs(plan, marked, {}, rule_loader(repo, root, {}), planning_change=root)
+    policy = rule_inputs(plan, marked, {}, rule_loader(repo, root, {}), change=root, repo=repo)
     return {'status': 'ok', 'notice': 'structure only; not execution, authorization or acceptance',
             **(policy.result() if policy else {})}
 
@@ -363,7 +375,8 @@ def run(args):
     plan_bytes, tasks_bytes = (contents[rel + '/' + name] for name in ('plan.md', 'tasks.md'))
     marked = contract_inputs(plan_bytes, tasks_bytes)
     external = {}
-    policy = rule_inputs(plan_bytes, marked, specs, rule_loader(root, change, external, contents))
+    policy = rule_inputs(plan_bytes, marked, specs, rule_loader(root, change, external, contents),
+                         change=change, repo=root, spec_prefix=rel + '/')
     for path, data in external.items():
         contents.setdefault(path, b'\x01' + data)
     if marked is not None:
@@ -372,7 +385,9 @@ def run(args):
         marks = [checkboxes[task_id][0] for task_id in ids]
     else:
         tasklines = visible(tasks_bytes.decode())
-        entries = [re.fullmatch(r'\s*-\s*\[([ xX~])\]\s+(\d+\.\d+)\s+\S.*', line) for line in tasklines if re.match(r'^\s*-\s*\[', line)]
+        entries = [re.fullmatch(r'\s*-\s*\[([ xX~])\]\s+(\d+\.\d+)\s+\S.*', line)
+                   for line in tasklines if (prefix := LEGACY_TASK_ITEM.match(line))
+                   and not TASK_DOC_LINK.match(line, prefix.end())]
         if not entries or any(x is None for x in entries):
             raise Invalid()
         ids = [x.group(2) for x in entries]

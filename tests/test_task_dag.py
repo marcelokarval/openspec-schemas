@@ -431,3 +431,57 @@ class TaskDagTest(unittest.TestCase):
     @staticmethod
     def compact(output):
         return "\n".join(" ".join(line.split()) for line in output.splitlines()) + "\n"
+
+    def test_review_a2_inline_multiline_comment_hides_legacy_dependency(self):
+        hidden = '## Task 1.1\nNotes: <!--\n- Depends on: none\n-->\n'
+        output = self.output(hidden, '- [ ] 1.1 Actual\n')
+        self.assertIn('1.1 [ ] unknown', self.compact(output))
+        self.assertIn('Next front: none\n', output)
+        self.assertIn('Next front: 1.1\n', self.output(hidden + '- Depends on: none\n', '- [ ] 1.1 Actual\n'))
+        quoted = '## Task 1.1\nExample `<!--` in prose.\n- Depends on: none\n'
+        self.assertIn('Next front: 1.1\n', self.output(quoted, '- [ ] 1.1 Actual\n'))
+
+    def test_review_a5_legacy_reads_two_space_checkbox_indentation(self):
+        tasks = '  - [ ] 1.1 Actual\n'
+        self.assertIn('Next front: 1.1\n', self.output(self.plan(('1.1', 'none')), tasks))
+        self.invalid(MARKER + microcontract('1.1'), tasks, 'top-level checkbox')
+
+    def test_review_a6_inline_links_are_not_malformed_tasks(self):
+        plan = MARKER + microcontract('1.1')
+        tasks = '- [Design](design.md)\n- [ ] 1.1 Actual\n'
+        self.assertIn('Next front: 1.1\n', self.output(plan, tasks))
+        for bad in ('- [?] 1.1 Invalid', '- [x] 1.1 Duplicate', '- [x](design.md)'):
+            self.invalid(plan, tasks + bad + '\n', 'tasks.md:3:')
+
+    def test_adjust_a2_chained_multiline_comments_stay_hidden(self):
+        tasks = '- [ ] 1.1 Actual\n'
+        for opening in ('Notes: <!-- First\n--> <!-- Second', '<!-- First --> <!-- Second'):
+            with self.subTest(opening=opening):
+                comment = opening + '\n- Depends on: none\n-->\n'
+                hidden = '## Task 1.1\n' + comment
+                output = self.output(hidden, tasks)
+                self.assertIn('1.1 [ ] unknown', self.compact(output))
+                self.assertIn('Next front: none\n', output)
+                self.assertIn('Next front: 1.1\n', self.output(hidden + '- Depends on: none\n', tasks))
+                self.invalid(MARKER + microcontract('1.1') + comment, tasks, 'comment must close on the same line')
+
+    def test_adjust_a6_titled_and_reference_links_are_documentation(self):
+        plan = MARKER + microcontract('1.1')
+        links = ('- [Design](design.md "Design notes")\n'
+                 '- [Design][notes]\n\n[notes]: design.md\n')
+        tasks = '- [Design](design.md)\n- [ ] 1.1 Actual\n\n[notes]: design.md\n'
+        for link in links.splitlines()[:2]:
+            with self.subTest(link=link):
+                self.assertIn('Next front: 1.1\n', self.output(plan, link + '\n[notes]: design.md\n- [ ] 1.1 Actual\n'))
+        for bad in ('- [?] 1.1 [Design][notes]', '- [x] 1.1 Duplicate',
+                    '- [x][notes]', '- [Design](design.md "unfinished)', '- [Design][notes'):
+            with self.subTest(bad=bad):
+                self.invalid(plan, tasks + bad + '\n', 'tasks.md:5:')
+
+    def test_adjust_a6_complete_links_allow_attached_prose(self):
+        plan = MARKER + microcontract('1.1')
+        for link in ('[Design](design.md)', '[Design](design.md "Design notes")', '[Design][notes]'):
+            for suffix in ('.', ', for context', ' and see the notes'):
+                with self.subTest(link=link, suffix=suffix):
+                    tasks = f'- {link}{suffix}\n- [ ] 1.1 Actual\n\n[notes]: design.md\n'
+                    self.assertIn('Next front: 1.1\n', self.output(plan, tasks))

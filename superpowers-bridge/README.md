@@ -106,8 +106,11 @@ run on the same line. In a marked plan, use an unindented `-` for each task micr
 spaces or tabs around field names do not change which field is declared.
 In `tasks.md`, use only top-level `- [ ] X.Y Description` entries
 with the supported checkbox states; alternate list markers and nested task
-checkboxes are rejected. The checker also rejects blank prompts, placeholders
-such as `TBD`, and conflicting declarations.
+checkboxes are rejected. Documentation list items such as `- [Design](design.md)`,
+`- [Design](design.md "Design notes")`, and `- [Design][notes]` do not create tasks.
+Define `notes` as a Markdown link reference; the checker does not resolve link
+destinations. The checker also rejects blank prompts, placeholders such as `TBD`,
+and conflicting declarations.
 Before handing off a new plan and after refining it, run:
 
 ```sh
@@ -144,13 +147,27 @@ adds no rule. For a removal or cross-cutting change, specify any changed outcome
 in the affected surviving capability and reference the shared decision.
 
 - Under `### Requirement:` write bare lines `Rule: BR-LIMIT` and `Decision: approved`
-  (or `proposed` / `blocked`). Give each material `#### Scenario:` its own bare
-  `Scenario ID: AC-OVER` line, using unique IDs. For a shared definition use
+  (or `proposed` / `blocked`). Every visible `#### Scenario:` in a material
+  requirement needs exactly one unique, bare `Scenario ID: AC-OVER` line. This
+  includes the boundary case and scenarios in a consuming requirement. A prose
+  line like `Decision: keep the existing copy` does not opt in a requirement
+  without rule or scenario metadata. The exact values `approved`, `proposed`,
+  and `blocked` are reserved declarations and require a `Rule`. For a shared definition use
   `Rule reference: BR-LIMIT => policies/limits.md#limit` instead of redefining it.
   The target must be a regular Markdown file outside the change in the same repo;
   its `### Requirement: Limit {#limit}` must define that rule and decision directly.
   The guard binds the referenced file's bytes. An ordinary citation or URL may
   explain provenance but is neither resolved by this wire nor proof of behavior.
+  If the same change also modifies the defining capability, put the full
+  requirement under `## MODIFIED Requirements` in `specs/<capability>/spec.md`.
+  Other capabilities still reference the anchored baseline, for example
+  `Rule reference: BR-LIMIT => openspec/specs/<capability>/spec.md#limit`.
+  The guard uses the modified decision and scenarios only when the baseline
+  capability path, the full case-sensitive requirement heading (including
+  `{#limit}`, after trimming), and the BR ID match. It still binds both files
+  to the candidate. Preserve the scenario names OpenSpec requires for archive
+  or use its removal workflow; the guard checks scenario IDs and coverage for
+  the effective rule, not whether OpenSpec will apply the delta.
 - In `plan.md` add `Bridge rule contract: 1` alongside the task marker. Under each
   materially linked task use one bare `Rule scenario: BR-LIMIT => AC-OVER` per pair
   and one `Rule readiness: ready` or `Rule readiness: blocked`. Cover every local
@@ -212,7 +229,9 @@ The generator writes to stdout only by default; it does not update the plan,
 checkboxes, or other files. On resumption, recompute from the current sources;
 show the view again only if dependencies, checkbox state, or the next front
 changed. A missing dependency line in a
-legacy plan means unknown, not `none`; do not migrate or assume independence.
+legacy plan means unknown, not `none`; a declaration inside an HTML comment
+does not count. The legacy DAG also reads described task checkboxes with up to
+three leading spaces; marked plans still require top-level task checkboxes.
 A checked `[x]` records task state, not acceptance, authorization, or proof of
 safe parallelism. Even independent graph nodes can conflict over files or other
 resources: check those conflicts and grants separately before dispatch. In the

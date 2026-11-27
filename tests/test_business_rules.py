@@ -323,3 +323,126 @@ class RuleTest(unittest.TestCase):
                 self.plan.write_text(PLAN + 'Rule scenario: BR-LIMIT => AC-NOW\n')
                 self.reject('planning', 'AC-OVER')
                 self.plan.write_text(PLAN)
+
+    def test_review_a1_each_material_scenario_must_have_one_id(self):
+        extra = '\n#### Scenario: Exactly at the limit\n- **THEN** allow the operation\n'
+        for spec in (SPEC, REF):
+            with self.subTest(material='reference' if spec == REF else 'definition'):
+                self.source.write_text(EXTERNAL)
+                proof = dict(PROOF, scenario='AC-LOCAL' if spec == REF else 'AC-OVER')
+                self.plan.write_text(PLAN.replace('AC-OVER', proof['scenario']))
+                self.spec.write_text(spec + extra)
+                _, candidate = self.run_guard('candidate')
+                self.verdict(candidate.get('candidate', 'unavailable'))
+                path = self.change / 'evidence.json'
+                evidence = json.loads(path.read_text())
+                evidence['tasks'][0]['rule_scenarios'] = [proof]
+                path.write_text(json.dumps(evidence))
+                for phase in ('planning', 'preflight', 'candidate', 'verify'):
+                    with self.subTest(phase=phase):
+                        self.reject(phase, 'Exactly at the limit')
+        self.spec.write_text(REF + extra + 'Scenario ID: AC-AT\nScenario ID: AC-AGAIN\n')
+        self.reject('planning', 'Exactly at the limit')
+        self.spec.write_text(REF + extra.replace('Scenario: Exactly', 'Scenario:Exactly'))
+        self.reject('planning', 'Exactly at the limit')
+
+    def test_review_a4_decision_prose_is_not_a_rule_declaration(self):
+        editorial = ('\n### Requirement: Keep the copy\nDecision: keep the existing copy\n'
+                     '#### Scenario: Existing copy\n- **THEN** keep the existing wording\n')
+        self.spec.write_text(SPEC + editorial)
+        code, report = self.run_guard('planning')
+        self.assertEqual(code, 0, report)
+        for malformed, diagnostic in ((editorial + 'Scenario ID: AC-ORPHAN\n', 'Rule'),
+                                      (editorial.replace('Decision:', 'Rule: BR-COPY\nDecision:'), 'Decision'),
+                                      (editorial.replace('Decision:', 'Rule: typo\nDecision:'), 'Rule')):
+            self.spec.write_text(SPEC + malformed)
+            self.reject('planning', diagnostic)
+        self.spec.write_text(SPEC.replace('Decision: approved', 'Decision: keep the existing copy'))
+        self.reject('planning', 'Decision')
+
+    def shared_change(self, capability):
+        baseline = f'openspec/specs/{capability}/spec.md'
+        self.source = self.repo / baseline
+        self.source.parent.mkdir(parents=True)
+        self.source.write_text(EXTERNAL)
+        self.spec.write_text(REF.replace('policies/limits.md', baseline))
+        owner = self.change / f'specs/{capability}/spec.md'
+        owner.parent.mkdir()
+        modified = '## MODIFIED Requirements\n' + EXTERNAL.replace('AC-OVER', 'AC-NEW')
+        owner.write_text(modified)
+        self.plan.write_text(PLAN.replace('AC-OVER', 'AC-NEW') + 'Rule scenario: BR-LIMIT => AC-LOCAL\n')
+        return owner, modified
+
+    def test_review_a3_modified_shared_rule_resolves_before_or_after_consumer(self):
+        for capability, current_ac in (('aaa-owner', 'AC-OVER'), ('zzz-owner', 'AC-NEW')):
+            with self.subTest(capability=capability):
+                owner, modified = self.shared_change(capability)
+                owner.write_text(modified.replace('AC-NEW', current_ac)
+                                 .replace('Limit {#limit}\n', 'Limit {#limit}  \n'))
+                self.plan.write_text(self.plan.read_text().replace('AC-NEW', current_ac))
+                self.source.write_text(EXTERNAL.replace('Decision: approved', 'Decision: blocked'))
+                code, report = self.run_guard('planning')
+                self.assertEqual((code, report.get('rule_blocked_tasks')), (0, []), report)
+                self.assertEqual(self.run_guard('preflight')[0], 0)
+                code, candidate = self.run_guard('candidate')
+                self.assertEqual(code, 0, candidate)
+                self.verdict(candidate['candidate'])
+                path = self.change / 'evidence.json'
+                evidence = json.loads(path.read_text())
+                evidence['tasks'][0]['rule_scenarios'] = [dict(PROOF), dict(PROOF, scenario='AC-LOCAL')]
+                path.write_text(json.dumps(evidence))
+                if current_ac != 'AC-OVER':
+                    self.reject('verify', 'rule_scenarios')
+                evidence['tasks'][0]['rule_scenarios'][0]['scenario'] = current_ac
+                path.write_text(json.dumps(evidence))
+                self.assertEqual(self.run_guard('verify')[0], 0)
+                self.source.write_text(self.source.read_text() + '\nBaseline wording changes.\n')
+                self.assertNotEqual(self.run_guard('candidate')[1]['candidate'], candidate['candidate'])
+                self.assertEqual(self.run_guard('verify')[0], 1)
+                owner.unlink()
+                owner.parent.rmdir()
+
+    def test_review_a3_rejects_other_paths_headings_and_independent_definitions(self):
+        owner, modified = self.shared_change('owner')
+        original_ref = self.spec.read_text()
+        other = self.repo / 'openspec/specs/unrelated/spec.md'
+        other.parent.mkdir()
+        other.write_text(EXTERNAL)
+        for delta, reference in (
+            (modified.replace('MODIFIED', 'ADDED'), original_ref),
+            (modified.replace('Limit {#limit}', 'limit {#limit}'), original_ref),
+            (modified.replace('Limit {#limit}', 'Limit {#different}'), original_ref),
+            (modified.replace('Limit {#limit}', 'Limit'), original_ref),
+            (modified.replace('Limit {#limit}', 'Limit {#limit} <!-- different key -->'), original_ref),
+            (modified, original_ref.replace('/owner/', '/unrelated/')),
+        ):
+            with self.subTest(delta=delta.splitlines()[1], reference=reference):
+                owner.write_text(delta)
+                self.spec.write_text(reference)
+                self.reject('planning', 'BR-LIMIT')
+        owner.write_text(modified)
+        self.spec.write_text(original_ref)
+        self.source.write_text(EXTERNAL.replace('BR-LIMIT', 'BR-DIFFERENT'))
+        self.reject('planning', 'BR-LIMIT')
+        self.source.write_text(EXTERNAL + '\n' + EXTERNAL.replace(' {#limit}', ' {#duplicate}')
+                               .replace('AC-OVER', 'AC-DUPLICATE'))
+        self.reject('planning', 'BR-LIMIT')
+        self.source.write_text(EXTERNAL)
+        self.plan.write_text(self.plan.read_text().replace('AC-NEW', 'AC-OVER'))
+        self.reject('preflight', 'AC-OVER')
+
+    def test_adjust_a4_reserved_decision_requires_a_rule(self):
+        req = '\n### Requirement: Existing copy\nDecision: {}\n'
+        for decision in ('approved', 'proposed', 'blocked'):
+            self.spec.write_text(SPEC + req.format(decision))
+            _, candidate = self.run_guard('candidate')
+            self.verdict(candidate.get('candidate', 'unavailable'))
+            path = self.change / 'evidence.json'
+            evidence = json.loads(path.read_text())
+            evidence['tasks'][0]['rule_scenarios'] = [PROOF]
+            path.write_text(json.dumps(evidence))
+            for phase in ('planning', 'preflight', 'candidate', 'verify'):
+                with self.subTest(decision=decision, phase=phase):
+                    self.reject(phase, 'Decision')
+        self.spec.write_text(SPEC + req.format('keep the existing copy'))
+        self.assertEqual(self.run_guard('planning')[0], 0)

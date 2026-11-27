@@ -47,9 +47,14 @@ artifacts:
       MODIFIED, REMOVED and RENAMED delta semantics including full modified
       requirements, Reason/Migration for removals and FROM/TO for renames.
       For a material rule use the template's Rule and Decision lines, or a Rule
-      reference to its canonical definition. Give each material scenario a
-      stable Scenario ID. Specify the outcome and a nearby case requiring a
-      different response; explain which condition changes the answer. Keep
+      reference to its canonical definition. Give every visible scenario of
+      that requirement exactly one stable Scenario ID, including the boundary
+      case and scenarios in a consuming requirement. Specify the outcome and a
+      nearby case requiring a different response; explain which condition
+      changes the answer. When the defining capability also has a MODIFIED
+      delta, consumers still reference the anchored openspec/specs baseline.
+      Keep the same capability, full requirement heading including its anchor,
+      and Rule ID, so the guard uses the modified decision and scenarios. Keep
       REMOVED Reason/Migration and RENAMED FROM/TO intact. A pure rename adds no
       policy. If a removal or cross-cutting change alters a surviving consumer's
       outcome, specify that outcome there and reference its canonical decision.
